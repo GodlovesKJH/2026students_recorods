@@ -367,7 +367,18 @@ function App() {
     if (listening) { recogRef.current?.stop(); setListening(false); return; }
     const r = new SR();
     r.lang="ko-KR"; r.continuous=true; r.interimResults=true;
-    r.onresult = e => setInput(Array.from(e.results).map(x=>x[0].transcript).join(""));
+    r.onresult = e => {
+      let final = "";
+      let interim = "";
+      for (let i = 0; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          final += e.results[i][0].transcript;
+        } else {
+          interim += e.results[i][0].transcript;
+        }
+      }
+      setInput(final + interim);
+    };
     r.onend = () => setListening(false);
     r.start(); recogRef.current=r; setListening(true);
   };
