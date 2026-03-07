@@ -24,6 +24,7 @@
 const { useState, useEffect, useRef } = React;
 
 const SCRIPT_URL_KEY = "srnote_script_url_v3";
+const API_KEY_KEY = "srnote_api_key_v1";
 
 const TYPE_META = {
   "관찰":     { color: "#2563eb", bg: "#eff6ff", icon: "👁️" },
@@ -89,10 +90,10 @@ function fmtDate(str) {
   return isNaN(d) ? str : d.toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" });
 }
 
-async function callClaude(text) {
+async function callClaude(text, apiKey) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1000,
@@ -302,6 +303,8 @@ function StudentManageTab({ students, scriptUrl, semester, onRefresh, showToast 
 // ── 메인 앱 ──
 function App() {
   const [scriptUrl, setScriptUrl] = useState(null);
+  const [apiKey, setApiKey] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
   const [booting, setBooting] = useState(true);
   const [tab, setTab] = useState("new");
   const [records, setRecords] = useState([]);
@@ -319,6 +322,8 @@ function App() {
   useEffect(() => {
     const saved = localStorage.getItem(SCRIPT_URL_KEY);
     if (saved) setScriptUrl(saved);
+    const savedKey = localStorage.getItem(API_KEY_KEY);
+    if (savedKey) setApiKey(savedKey);
     setBooting(false);
   }, []);
 
@@ -369,9 +374,10 @@ function App() {
 
   const handleAnalyze = async () => {
     if (!input.trim()) return;
+    if (!apiKey.trim()) { showToast("API 키를 먼저 입력해주세요 (⚙️ 설정 탭)", false); return; }
     setAiLoading(true);
     try {
-      const { records: parsed } = await callClaude(input.trim());
+      const { records: parsed } = await callClaude(input.trim(), apiKey.trim());
       if (!parsed?.length) { showToast("학생 기록을 찾을 수 없어요", false); return; }
       setPreview({ raw:input.trim(), parsed });
     } catch { showToast("AI 분석 중 오류 발생", false); }
@@ -410,7 +416,7 @@ function App() {
   if (booting) return <div style={{ height:"100vh", display:"flex", alignItems:"center", justifyContent:"center", color:"#94a3b8" }}>로딩 중...</div>;
   if (!scriptUrl) return <SetupWizard onComplete={handleSetupComplete} />;
 
-  const TABS = [["new","📝","새 기록"],["records","📋","전체 기록"],["students","👥","학생별"],["manage","👤","학생 관리"]];
+  const TABS = [["new","📝","새 기록"],["records","📋","전체 기록"],["students","👥","학생별"],["manage","👤","학생 관리"],["settings","⚙️","설정"]];
 
   return (
     <div style={{ fontFamily:"'Apple SD Gothic Neo','Nanum Gothic',sans-serif", background:"#f8fafc", minHeight:"100vh" }}>
@@ -560,6 +566,47 @@ function App() {
         {tab === "manage" && (
           <StudentManageTab students={students} scriptUrl={scriptUrl} semester={curSemester} onRefresh={loadData} showToast={showToast} />
         )}
+
+        {tab === "settings" && (
+          <div>
+            <div style={{ background:"#fff", borderRadius:16, padding:22, boxShadow:"0 2px 12px rgba(0,0,0,.07)", border:"1px solid #e8e4dc", marginBottom:14 }}>
+              <div style={{ fontWeight:800, fontSize:16, color:"#1e293b", marginBottom:4 }}>🤖 Claude API 키</div>
+              <div style={{ fontSize:13, color:"#64748b", marginBottom:16, lineHeight:1.7 }}>
+                AI 분류 기능에 필요해요. console.anthropic.com에서 발급받은 키를 입력하세요.
+              </div>
+              <div style={{ position:"relative" }}>
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder="sk-ant-api03-..."
+                  style={{ width:"100%", padding:"11px 44px 11px 13px", borderRadius:10, border:"1.5px solid #e2e8f0", fontSize:13, outline:"none", fontFamily:"monospace" }}
+                />
+                <button onClick={()=>setShowApiKey(v=>!v)} style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", fontSize:16, color:"#94a3b8" }}>
+                  {showApiKey ? "🙈" : "👁️"}
+                </button>
+              </div>
+              <button onClick={()=>{ localStorage.setItem(API_KEY_KEY, apiKey.trim()); showToast("API 키 저장됐어요! ✅"); }} style={{ width:"100%", marginTop:12, padding:13, borderRadius:11, border:"none", background: apiKey.trim()?"#1e293b":"#e2e8f0", color: apiKey.trim()?"#fff":"#94a3b8", fontWeight:700, fontSize:14, cursor: apiKey.trim()?"pointer":"default" }}>
+                💾 키 저장하기
+              </button>
+              <div style={{ marginTop:10, fontSize:12, color:"#94a3b8", background:"#f8fafc", borderRadius:8, padding:"10px 12px", lineHeight:1.7 }}>
+                🔒 키는 이 기기의 브라우저에만 저장돼요. 외부로 전송되지 않아요.
+              </div>
+            </div>
+
+            <div style={{ background:"#fff", borderRadius:16, padding:22, boxShadow:"0 2px 12px rgba(0,0,0,.07)", border:"1px solid #e8e4dc" }}>
+              <div style={{ fontWeight:800, fontSize:16, color:"#1e293b", marginBottom:4 }}>🔗 구글 시트 연결</div>
+              <div style={{ fontSize:13, color:"#64748b", marginBottom:14 }}>현재 연결된 Apps Script URL</div>
+              <div style={{ background:"#f8fafc", borderRadius:9, padding:"10px 13px", fontSize:11, color:"#475569", fontFamily:"monospace", wordBreak:"break-all", lineHeight:1.6 }}>
+                {scriptUrl || "연결 없음"}
+              </div>
+              <button onClick={()=>{ localStorage.removeItem(SCRIPT_URL_KEY); setScriptUrl(null); }} style={{ width:"100%", marginTop:12, padding:12, borderRadius:11, border:"1.5px solid #fca5a5", background:"#fff", color:"#dc2626", fontWeight:700, fontSize:13, cursor:"pointer" }}>
+                🔄 구글 시트 재연결
+              </button>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {preview && (
