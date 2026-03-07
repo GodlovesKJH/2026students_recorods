@@ -361,25 +361,27 @@ function App() {
     setScriptUrl(url);
   };
 
+  const finalTranscriptRef = useRef("");
+
   const toggleVoice = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { showToast("이 브라우저는 음성 인식을 지원하지 않아요", false); return; }
     if (listening) { recogRef.current?.stop(); setListening(false); return; }
+    finalTranscriptRef.current = input;
     const r = new SR();
     r.lang="ko-KR"; r.continuous=true; r.interimResults=true;
     r.onresult = e => {
-      let final = "";
-      let interim = "";
-      for (let i = 0; i < e.results.length; i++) {
+      let interimTranscript = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          final += e.results[i][0].transcript;
+          finalTranscriptRef.current += e.results[i][0].transcript;
         } else {
-          interim += e.results[i][0].transcript;
+          interimTranscript += e.results[i][0].transcript;
         }
       }
-      setInput(final + interim);
+      setInput(finalTranscriptRef.current + interimTranscript);
     };
-    r.onend = () => setListening(false);
+    r.onend = () => { setInput(finalTranscriptRef.current); setListening(false); };
     r.start(); recogRef.current=r; setListening(true);
   };
 
