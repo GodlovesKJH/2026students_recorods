@@ -19,7 +19,78 @@
 <script>
 // ★ 수정된 Apps Script: 모든 쓰기를 GET으로 처리 → no-cors 문제 해결, 저장 성공 여부 확인 가능
 // ★ 삭제(deleteRecord, deleteStudent), 수정(updateRecord) 기능 추가
-window.APPS_SCRIPT_CODE = 'function doGet(e) {\n  const ss = SpreadsheetApp.getActiveSpreadsheet();\n  const action = e.parameter.action;\n  try {\n    if (action === \'getRecords\') {\n      const s = ss.getSheetByName(\'Records\');\n      return res({ success: true, data: s.getDataRange().getValues() });\n    }\n    if (action === \'getStudents\') {\n      const s = ss.getSheetByName(\'Students\');\n      return res({ success: true, data: s.getDataRange().getValues() });\n    }\n    if (action === \'init\') {\n      const sr = ss.getSheetByName(\'Students\');\n      if (sr.getLastRow() === 0)\n        sr.appendRow([\'학생ID\',\'이름\',\'성별\',\'학년\',\'반\',\'번호\',\'학기\',\'메모\',\'생성일\']);\n      const rr = ss.getSheetByName(\'Records\');\n      if (rr.getLastRow() === 0)\n        rr.appendRow([\'기록ID\',\'학생이름\',\'날짜\',\'학기\',\'기록유형\',\'요약\',\'내용\',\'태그\',\'원문\',\'생성시간\']);\n      return res({ success: true });\n    }\n    if (action === \'addRecord\') {\n      const p = e.parameter;\n      ss.getSheetByName(\'Records\').appendRow(\n        [p.id, p.studentName, p.date, p.semester, p.type, p.summary, p.content, p.tags, p.raw||\'\', p.createdAt]\n      );\n      return res({ success: true });\n    }\n    if (action === \'addStudent\') {\n      const p = e.parameter;\n      ss.getSheetByName(\'Students\').appendRow(\n        [p.id, p.name, p.gender, p.grade, p.classNum, p.number, p.semester, p.memo, p.createdAt]\n      );\n      return res({ success: true });\n    }\n    if (action === \'deleteRecord\') {\n      const sheet = ss.getSheetByName(\'Records\');\n      const data = sheet.getDataRange().getValues();\n      for (let i = 1; i < data.length; i++) {\n        if (String(data[i][0]) === String(e.parameter.id)) {\n          sheet.deleteRow(i + 1); break;\n        }\n      }\n      return res({ success: true });\n    }\n    if (action === \'deleteStudent\') {\n      const sheet = ss.getSheetByName(\'Students\');\n      const data = sheet.getDataRange().getValues();\n      for (let i = 1; i < data.length; i++) {\n        if (String(data[i][0]) === String(e.parameter.id)) {\n          sheet.deleteRow(i + 1); break;\n        }\n      }\n      return res({ success: true });\n    }\n    if (action === \'updateRecord\') {\n      const p = e.parameter;\n      const sheet = ss.getSheetByName(\'Records\');\n      const data = sheet.getDataRange().getValues();\n      for (let i = 1; i < data.length; i++) {\n        if (String(data[i][0]) === String(p.id)) {\n          const row = i + 1;\n          sheet.getRange(row, 2).setValue(p.studentName);\n          sheet.getRange(row, 5).setValue(p.type);\n          sheet.getRange(row, 6).setValue(p.summary);\n          sheet.getRange(row, 7).setValue(p.content);\n          break;\n        }\n      }\n      return res({ success: true });\n    }\n  } catch(err) { return res({ success: false, error: err.toString() }); }\n  return res({ success: false, error: \'unknown action\' });\n}\nfunction res(obj) {\n  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);\n}';
+window.APPS_SCRIPT_CODE = 'function doGet(e) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const action = e.parameter.action;
+  try {
+    if (action === \'getRecords\') {
+      const s = ss.getSheetByName(\'Records\');
+      return res({ success: true, data: s.getDataRange().getValues() });
+    }
+    if (action === \'getStudents\') {
+      const s = ss.getSheetByName(\'Students\');
+      return res({ success: true, data: s.getDataRange().getValues() });
+    }
+    if (action === \'init\') {
+      const sr = ss.getSheetByName(\'Students\');
+      if (sr.getLastRow() === 0) sr.appendRow([\'학생ID\',\'이름\',\'성별\',\'학년\',\'반\',\'번호\',\'학기\',\'메모\',\'생성일\']);
+      const rr = ss.getSheetByName(\'Records\');
+      if (rr.getLastRow() === 0) rr.appendRow([\'기록ID\',\'학생이름\',\'날짜\',\'학기\',\'기록유형\',\'요약\',\'내용\',\'태그\',\'원문\',\'생성시간\']);
+      return res({ success: true });
+    }
+    if (action === \'deleteRecord\') {
+      const sheet = ss.getSheetByName(\'Records\');
+      const data = sheet.getDataRange().getValues();
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]) === String(e.parameter.id)) { sheet.deleteRow(i + 1); break; }
+      }
+      return res({ success: true });
+    }
+    if (action === \'deleteStudent\') {
+      const sheet = ss.getSheetByName(\'Students\');
+      const data = sheet.getDataRange().getValues();
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]) === String(e.parameter.id)) { sheet.deleteRow(i + 1); break; }
+      }
+      return res({ success: true });
+    }
+  } catch(err) { return res({ success: false, error: err.toString() }); }
+  return res({ success: false, error: \'unknown action\' });
+}
+function doPost(e) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    const b = JSON.parse(e.postData.contents);
+    if (b.action === \'addRecord\') {
+      ss.getSheetByName(\'Records\').appendRow(
+        [b.id, b.studentName, b.date, b.semester, b.type, b.summary, b.content, b.tags, b.raw||\'\', b.createdAt]
+      );
+    }
+    if (b.action === \'addStudent\') {
+      ss.getSheetByName(\'Students\').appendRow(
+        [b.id, b.name, b.gender, b.grade, b.classNum, b.number, b.semester, b.memo, b.createdAt]
+      );
+    }
+    if (b.action === \'updateRecord\') {
+      const sheet = ss.getSheetByName(\'Records\');
+      const data = sheet.getDataRange().getValues();
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]) === String(b.id)) {
+          sheet.getRange(i+1,2).setValue(b.studentName);
+          sheet.getRange(i+1,5).setValue(b.type);
+          sheet.getRange(i+1,6).setValue(b.summary);
+          sheet.getRange(i+1,7).setValue(b.content);
+          break;
+        }
+      }
+    }
+    return res({ success: true });
+  } catch(err) { return res({ success: false, error: err.toString() }); }
+}
+function res(obj) {
+  const output = ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+  return output;
+}';
 </script>
 </head>
 <body>
@@ -186,14 +257,17 @@ function StudentManageTab({ students, scriptUrl, semester, onRefresh, showToast,
     setSaving(true);
     try {
       // ★ GET 방식으로 저장 → 성공 여부 확인 가능
-      const params = new URLSearchParams({
-        action:"addStudent", id:`S${Date.now()}`,
-        name:form.name.trim(), gender:form.gender,
-        grade:form.grade, classNum:form.classNum,
-        number:form.number, memo:form.memo,
-        semester, createdAt:new Date().toISOString(),
+      const r = await fetch(scriptUrl, {
+        method:"POST",
+        headers:{"Content-Type":"text/plain"},
+        body: JSON.stringify({
+          action:"addStudent", id:`S${Date.now()}`,
+          name:form.name.trim(), gender:form.gender,
+          grade:form.grade, classNum:form.classNum,
+          number:form.number, memo:form.memo,
+          semester, createdAt:new Date().toISOString(),
+        }),
       });
-      const r = await fetch(`${scriptUrl}?${params}`);
       const d = await r.json();
       if (d.success) {
         showToast(`${form.name} 학생 추가됐어요! ✅`);
@@ -293,8 +367,11 @@ function EditRecordModal({ record, scriptUrl, onSaved, onClose }) {
     if (!form.studentName.trim()) { setErr("학생 이름을 입력해주세요"); return; }
     setSaving(true); setErr("");
     try {
-      const params = new URLSearchParams({ action:"updateRecord", id:record.id, ...form });
-      const r = await fetch(`${scriptUrl}?${params}`);
+      const r = await fetch(scriptUrl, {
+        method:"POST",
+        headers:{"Content-Type":"text/plain"},
+        body: JSON.stringify({ action:"updateRecord", id:record.id, ...form }),
+      });
       const d = await r.json();
       if (d.success) { onSaved({ ...record, ...form }); }
       else setErr("수정 실패: " + (d.error||""));
@@ -377,8 +454,8 @@ function App() {
   useEffect(() => {
     const saved = localStorage.getItem(SCRIPT_URL_KEY);
     if (saved) setScriptUrl(saved);
-    // ★ API 키: sessionStorage 사용 (탭 닫으면 자동 삭제 → 보안 강화)
-    const savedKey = sessionStorage.getItem(API_KEY_KEY);
+    // API 키: localStorage 사용 (폰에 영구 저장)
+    const savedKey = localStorage.getItem(API_KEY_KEY);
     if (savedKey) setApiKey(savedKey);
     setBooting(false);
   }, []);
@@ -420,7 +497,7 @@ function App() {
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
-        headers:{ "Content-Type":"application/json", "x-api-key":apiKey.trim(), "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+        headers:{ "Content-Type":"text/plain", "x-api-key":apiKey.trim(), "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:1000,
           system:`초등학교 교사의 학생 기록을 분석합니다. 반드시 JSON만 응답하세요. 다른 텍스트 없이.
@@ -466,17 +543,20 @@ ${students.length > 0 ? students.map(s=>s.name).join(", ") : "없음"}
     let saved = 0;
     for (const p of preview.parsed) {
       try {
-        const params = new URLSearchParams({
-          action:"addRecord",
-          id:`R${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-          studentName:p.studentName, date:recordDate,
-          semester:getSemester(recordDate), type:p.type,
-          summary:(p.summary||'').substring(0,100), content:(p.content||'').substring(0,800),
-          tags:(p.tags||[]).join(","),
-          raw:(preview.raw||"").substring(0,400),
-          createdAt:now,
+        const r = await fetch(scriptUrl, {
+          method:"POST",
+          headers:{"Content-Type":"text/plain"},
+          body: JSON.stringify({
+            action:"addRecord",
+            id:`R${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+            studentName:p.studentName, date:recordDate,
+            semester:getSemester(recordDate), type:p.type,
+            summary:p.summary||"", content:p.content||"",
+            tags:(p.tags||[]).join(","),
+            raw:(preview.raw||"").substring(0,500),
+            createdAt:now,
+          }),
         });
-        const r = await fetch(`${scriptUrl}?${params}`);
         const d = await r.json();
         if (d.success) saved++;
       } catch {}
@@ -733,13 +813,13 @@ ${students.length > 0 ? students.map(s=>s.name).join(", ") : "없음"}
                   {showApiKey?"🙈":"👁️"}
                 </button>
               </div>
-              {/* ★ sessionStorage 저장 */}
-              <button onClick={()=>{ sessionStorage.setItem(API_KEY_KEY,apiKey.trim()); showToast("API 키 저장됐어요! ✅"); }}
+              {/* API 키 localStorage 저장 */}
+              <button onClick={()=>{ localStorage.setItem(API_KEY_KEY,apiKey.trim()); showToast("API 키 저장됐어요! ✅"); }}
                 style={{ width:"100%", marginTop:12, padding:13, borderRadius:11, border:"none", background:apiKey.trim()?"#1e293b":"#e2e8f0", color:apiKey.trim()?"#fff":"#94a3b8", fontWeight:700, fontSize:14, cursor:apiKey.trim()?"pointer":"default" }}>
                 💾 키 저장하기
               </button>
               <div style={{ marginTop:10, fontSize:12, color:"#064e3b", background:"#f0fdf4", borderRadius:8, padding:"10px 12px", lineHeight:1.7, border:"1px solid #bbf7d0" }}>
-                🔒 키는 현재 탭의 메모리에만 저장돼요. <b>탭을 닫으면 자동으로 삭제</b>되어 타인에게 노출되지 않아요.
+                🔒 키는 <b>이 기기 브라우저에만 저장</b>되며 외부로 전송되지 않아요.
               </div>
             </div>
 
