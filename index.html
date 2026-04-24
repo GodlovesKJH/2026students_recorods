@@ -772,51 +772,138 @@ function StudTab({ cfg, students, records, testRes, setStudents, showToast }) {
 }
 
 function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, onClose }) {
-  // 구조화된 메모 파싱 (저장 형식: JSON 또는 기존 텍스트)
-  function parseMemo(raw) {
-    try {
-      const p = JSON.parse(raw || '{}');
-      if (p.__v === 2) return p;
-    } catch {}
-    // 기존 텍스트 메모 → 자유메모로 이전
-    return { __v:2, contact:'', family:'', caution:'', support:'', free: raw||'' };
-  }
-  const [memo, setMemo] = useState(() => parseMemo(student.profile));
-  const [saving, setSaving] = useState(false);
+  const apiKey = localStorage.getItem('anthropic_api_key') || '';
+  const [brief,    setBrief]   = useState('');
+  const [loading,  setLoading] = useState(false);
+  const [generated,setGen]     = useState(false);
 
   const career = testRes.find(t => t.studentName===student.name && t.testType==='진로검사');
   const person = testRes.find(t => t.studentName===student.name && t.testType==='성격검사');
-  const recentRecs = records
-    .filter(r => r.studentName===student.name)
-    .sort((a,b) => b.date.localeCompare(a.date))
-    .slice(0,5);
-  const counselRecs = records
-    .filter(r => r.studentName===student.name && (r.type==='상담'||r.type==='학부모상담'))
-    .sort((a,b) => b.date.localeCompare(a.date))
-    .slice(0,3);
   const crisis = person?.needsCounseling === 'Y';
-
   const FIT_CLS = { '높음':'b-good', '보통':'b-warn', '낮음':'b-danger' };
 
-  async function save() {
-    setSaving(true);
+  const allRecs = records
+    .filter(r => r.studentName===student.name)
+    .sort((a,b) => b.date.localeCompare(a.date));
+
+  // 앱 열 때 저장된 브리핑이 있으면 표시
+  useEffect(() => {
+    if (student.profile && !student.profile.startsWith('{')) {
+      setBrief(student.profile);
+      setGen(true);
+    } else if (student.profile) {
+      try {
+        const p = JSON.parse(student.profile);
+        if (p.brief) { setBrief(p.brief); setGen(true); }
+      } catch {}
+    }
+  }, []);
+
+  async function generate() {
+    if (!apiKey) { showToast('API 키가 필요해요 — ✏️ 입력 탭에서 설정', false); return; }
+    setLoading(true);
+    setBrief('');
+
+    const recText = allRecs.slice(0,20).map(r =>
+      `[${r.date}][${r.type}] ${r.summary} / ${r.content}`
+    ).join('
+');
+
+    const careerText = career
+      ? `진로코드: ${career.careerCode1}/${career.careerCode2}, 추천직업: ${career.topJob1}·${career.topJob2}, 계열: ${career.topField}, 적합도: ${career.fitLevel}`
+      : '진로검사 없음';
+
+    const personText = person
+      ? `성격특징: ${person.personalitySummary || ''}, 위기영역: ${person.riskFlags || '없음'}, 상담필요: ${person.needsCounseling}`
+      : '성격검사 없음';
+
+    const prompt = `당신은 초등학교 5학년 담임교사입니다. 학부모와 전화 상담 전, 해당 학생의 데이터를 분석해서 교사가 전화 통화 중 바로 참고할 수 있는 간결한 브리핑을 작성해주세요.
+
+학생 정보:
+- 이름: ${student.name} (${student.gender})
+- 번호: ${student.number || '미지정'}번
+
+진로검사 결과:
+${careerText}
+
+성격검사 결과:
+${personText}
+
+지금까지의 관찰·상담 기록 (최근순):
+${recText || '기록 없음'}
+
+---
+아래 형식으로 작성해주세요. 각 항목은 실제 데이터 기반으로만 작성하고, 데이터가 없는 항목은 "해당 없음"으로 표시하세요. 추측이나 과잉 해석 금지.
+
+🎯 진로 성향
+(진로코드 의미, 추천직업, 적합도 해석 — 2~3줄)
+
+🧠 성격·행동 특징
+(성격검사 기반 주요 특징 — 2~3줄)
+
+⚠️ 주의사항
+(위기영역 있을 경우 구체적 항목, 관찰 기록에서 반복 패턴, 상담 시 주의점 — 2~3줄)
+
+📝 최근 주요 기록
+(최근 1~2개월 내 중요 관찰·상담 내용 요약 — 3~5줄)
+
+💬 통화 시 꺼낼 수 있는 화제
+(위 데이터 기반으로 학부모와 자연스럽게 나눌 수 있는 대화 포인트 2~3가지)`;
+
     try {
-      const profile = JSON.stringify({...memo, __v:2});
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1200,
+          stream: true,
+          messages: [{ role:'user', content: prompt }]
+        })
+      });
+      if (!r.ok) throw new Error('API 오류');
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('
+');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+          try {
+            const evt = JSON.parse(data);
+            if (evt.type === 'content_block_delta' && evt.delta?.text) {
+              setBrief(prev => prev + evt.delta.text);
+            }
+          } catch {}
+        }
+      }
+      setGen(true);
+    } catch(e) {
+      showToast('AI 브리핑 생성 실패: ' + e.message, false);
+    }
+    setLoading(false);
+  }
+
+  async function saveBrief() {
+    try {
+      const profile = JSON.stringify({ __v:3, brief });
       await apiPost(cfg.scriptUrl, { action:'updateStudent', id:student.id, profile });
       setStudents(prev => prev.map(s => s.id===student.id ? {...s, profile} : s));
       showToast('저장됨 ✅');
-      onClose();
     } catch { showToast('저장 실패', false); }
-    setSaving(false);
   }
-
-  const fieldStyle = { marginBottom:10 };
-  const infoRow = (label, val) => val ? (
-    <div style={{display:'flex',gap:6,marginBottom:5,fontSize:13}}>
-      <span style={{color:'#a0aec0',minWidth:60,flexShrink:0}}>{label}</span>
-      <span style={{color:'#2d3748',fontWeight:500}}>{val}</span>
-    </div>
-  ) : null;
 
   return (
     <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
@@ -824,133 +911,84 @@ function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, 
         <div className="mhandle"/>
 
         {/* 헤더 */}
-        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
-          <div style={{width:44,height:44,borderRadius:'50%',background:'linear-gradient(135deg,#667eea,#764ba2)',
-            display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:800,fontSize:18,flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+          <div style={{width:44,height:44,borderRadius:'50%',
+            background:'linear-gradient(135deg,#667eea,#764ba2)',
+            display:'flex',alignItems:'center',justifyContent:'center',
+            color:'#fff',fontWeight:800,fontSize:20,flexShrink:0}}>
             {student.name[0]}
           </div>
-          <div>
+          <div style={{flex:1}}>
             <div style={{display:'flex',alignItems:'center',gap:6}}>
               <span style={{fontWeight:800,fontSize:18}}>{student.name}</span>
-              {crisis && <span style={{fontSize:16}}>🚨</span>}
+              {crisis && <span>🚨</span>}
+              {career && <span className={'badge '+(FIT_CLS[career.fitLevel]||'b-danger')} style={{fontSize:10}}>{career.careerCode1}</span>}
             </div>
-            <div style={{fontSize:12,color:'#718096'}}>{student.gender} · {student.number ? student.number+'번' : ''}</div>
+            <div style={{fontSize:11,color:'#718096'}}>{student.gender} · {student.number||''}번 · 기록 {allRecs.length}건</div>
           </div>
-          <div style={{marginLeft:'auto',fontSize:11,color:'#a0aec0',textAlign:'right'}}>
-            📞 전화 상담<br/>준비 카드
-          </div>
+          <div style={{fontSize:11,color:'#a0aec0',textAlign:'right',lineHeight:1.4}}>📞 전화 상담<br/>브리핑</div>
         </div>
 
-        {/* ① 위기 경보 */}
+        {/* 위기 경보 */}
         {crisis && person?.riskFlags && (
-          <div style={{background:'#fff5f5',border:'1.5px solid #fc8181',borderRadius:10,padding:12,marginBottom:14}}>
-            <div style={{fontWeight:700,color:'#c53030',marginBottom:6,fontSize:13}}>🚨 위기영역 주의 (T점수 60 미만)</div>
+          <div style={{background:'#fff5f5',border:'1.5px solid #fc8181',borderRadius:10,padding:10,marginBottom:12}}>
+            <div style={{fontWeight:700,color:'#c53030',fontSize:12,marginBottom:5}}>🚨 위기영역 (T점수 60 미만)</div>
             <div>{person.riskFlags.split(',').filter(Boolean).map((f,i)=>(
               <span key={i} className="risk-tag">{f.trim()}</span>
             ))}</div>
           </div>
         )}
 
-        {/* ② 진로검사 요약 */}
-        {career && (
-          <div className="tc tc-career" style={{marginBottom:10}}>
-            <div style={{fontWeight:700,fontSize:12,color:'#2b6cb0',marginBottom:6}}>🎯 진로검사 ({career.testDate})</div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:8,fontSize:13}}>
-              <span>코드 <b>{career.careerCode1}</b> / {career.careerCode2}</span>
-              <span className={'badge ' + (FIT_CLS[career.fitLevel]||'b-danger')}>적합도 {career.fitLevel}</span>
+        {/* AI 브리핑 영역 */}
+        {!generated && !loading && (
+          <div style={{textAlign:'center',padding:'24px 0'}}>
+            <div style={{fontSize:36,marginBottom:8}}>🤖</div>
+            <p style={{fontSize:14,color:'#4a5568',marginBottom:4,fontWeight:600}}>AI 전화 상담 브리핑</p>
+            <p style={{fontSize:12,color:'#a0aec0',marginBottom:20,lineHeight:1.6}}>
+              지금까지의 관찰·상담 기록과<br/>진로·성격검사 결과를 분석해서<br/>전화 통화 전 핵심 내용을 정리해드려요
+            </p>
+            <button className="btn btn-p btn-fw" onClick={generate}>
+              ✨ AI 브리핑 생성
+            </button>
+            {allRecs.length === 0 && !career && !person && (
+              <p style={{fontSize:11,color:'#fc8181',marginTop:10}}>⚠️ 아직 기록이나 검사결과가 없어요</p>
+            )}
+          </div>
+        )}
+
+        {loading && (
+          <div style={{background:'#f7fafc',borderRadius:12,padding:16,minHeight:120,marginBottom:12}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,color:'#667eea'}}>
+              <span className="spin" style={{borderColor:'rgba(102,126,234,.3)',borderTopColor:'#667eea'}}/>
+              <span style={{fontSize:13,fontWeight:600}}>AI가 분석 중…</span>
             </div>
-            <div style={{fontSize:12,color:'#2b6cb0',marginTop:6}}>
-              📌 추천직업: {career.topJob1}{career.topJob2 ? ' · '+career.topJob2 : ''}
+            <div style={{fontSize:13,color:'#4a5568',whiteSpace:'pre-wrap',lineHeight:1.8}}>{brief}</div>
+          </div>
+        )}
+
+        {generated && !loading && (
+          <div>
+            <div style={{background:'#f0f4ff',border:'1.5px solid #c3d2f7',borderRadius:12,padding:14,marginBottom:12}}>
+              <div style={{fontSize:13,color:'#2d3748',whiteSpace:'pre-wrap',lineHeight:1.9}}>{brief}</div>
             </div>
-            {career.topField && <div style={{fontSize:11,color:'#718096',marginTop:2}}>계열: {career.topField}</div>}
+            <div style={{display:'flex',gap:8,marginBottom:12}}>
+              <button className="btn btn-s btn-sm" style={{flex:1}} onClick={() => { setGen(false); setBrief(''); generate(); }}>
+                🔄 재생성
+              </button>
+              <button className="btn btn-p btn-sm" style={{flex:2}} onClick={saveBrief}>
+                💾 저장 (다음에도 보기)
+              </button>
+            </div>
           </div>
         )}
 
-        {/* ③ 성격 요약 */}
-        {person?.personalitySummary && (
-          <div className="tc tc-person" style={{marginBottom:10}}>
-            <div style={{fontWeight:700,fontSize:12,color:'#276749',marginBottom:4}}>🧠 성격 특징</div>
-            <div style={{fontSize:12,color:'#2d3748'}}>{person.personalitySummary}</div>
-          </div>
-        )}
-
-        {/* ④ 최근 상담 기록 */}
-        {counselRecs.length > 0 && (
-          <div style={{marginBottom:14}}>
-            <div className="sec" style={{marginTop:0}}>📝 최근 상담 기록</div>
-            {counselRecs.map(r => (
-              <div key={r.id} style={{background:'#f7fafc',borderRadius:8,padding:10,marginBottom:6}}>
-                <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:4}}>
-                  <span className={'badge '+(TYPE_CLS[r.type]||'b-관찰')} style={{fontSize:10}}>{r.type}</span>
-                  <span style={{fontSize:11,color:'#a0aec0'}}>{r.date}</span>
-                </div>
-                <div style={{fontSize:12,fontWeight:600,marginBottom:2}}>{r.summary}</div>
-                <div style={{fontSize:11,color:'#718096',lineHeight:1.5}}>{r.content}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ⑤ 최근 전체 기록 (간략) */}
-        {recentRecs.length > 0 && counselRecs.length === 0 && (
-          <div style={{marginBottom:14}}>
-            <div className="sec" style={{marginTop:0}}>📝 최근 관찰 기록</div>
-            {recentRecs.map(r => (
-              <div key={r.id} style={{background:'#f7fafc',borderRadius:8,padding:10,marginBottom:6}}>
-                <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:3}}>
-                  <span className={'badge '+(TYPE_CLS[r.type]||'b-관찰')} style={{fontSize:10}}>{r.type}</span>
-                  <span style={{fontSize:11,color:'#a0aec0'}}>{r.date}</span>
-                </div>
-                <div style={{fontSize:12,color:'#2d3748'}}>{r.summary}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="divider"/>
-
-        {/* ⑥ 구조화 메모 */}
-        <div style={{marginBottom:4}}>
-          <div className="sec" style={{marginTop:8}}>✍️ 상담 전 메모</div>
-
-          <label>📱 연락처 / 주 연락자</label>
-          <input type="text" value={memo.contact||''} style={fieldStyle}
-            placeholder="예: 엄마 010-0000-0000 (주로 받음)"
-            onChange={e => setMemo({...memo, contact:e.target.value})} />
-
-          <label>👨‍👩‍👧 가족 구성</label>
-          <input type="text" value={memo.family||''} style={fieldStyle}
-            placeholder="예: 부모님 + 남동생(2학년)"
-            onChange={e => setMemo({...memo, family:e.target.value})} />
-
-          <label>⚠️ 통화 시 주의사항</label>
-          <input type="text" value={memo.caution||''} style={fieldStyle}
-            placeholder="예: 부모 갈등 언급 자제, 아빠와 통화 시 조심"
-            onChange={e => setMemo({...memo, caution:e.target.value})} />
-
-          <label>🤝 지원 사항</label>
-          <input type="text" value={memo.support||''} style={fieldStyle}
-            placeholder="예: 발달지원 주 2회, 특수교육대상자"
-            onChange={e => setMemo({...memo, support:e.target.value})} />
-
-          <label>📌 기타 자유 메모</label>
-          <textarea value={memo.free||''} style={{minHeight:80,marginBottom:12}}
-            placeholder="그 외 알아두면 좋은 내용"
-            onChange={e => setMemo({...memo, free:e.target.value})} />
-        </div>
-
-        <div style={{display:'flex',gap:8}}>
-          <button className="btn btn-s" style={{flex:1}} onClick={onClose}>닫기</button>
-          <button className="btn btn-p" style={{flex:2}} onClick={save} disabled={saving}>
-            {saving ? <><span className="spin"/>&nbsp;저장 중…</> : '💾 저장'}
-          </button>
-        </div>
+        <button className="btn btn-s btn-fw" onClick={onClose}>닫기</button>
       </div>
     </div>
   );
 }
 
-// ── 관리 탭 ──────────────────────────────────────────────────────────────────
+
 function ManageTab({ cfg, students, setStudents, showToast, onReload, reloading, onReset }) {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name:'', gender:'여', number:'', memo:'' });
