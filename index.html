@@ -772,31 +772,48 @@ function StudTab({ cfg, students, records, testRes, setStudents, showToast }) {
 }
 
 function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, onClose }) {
-  const apiKey = localStorage.getItem('anthropic_api_key') || '';
-  const [brief,   setBrief]  = useState('');
-  const [loading, setLoading]= useState(false);
-  const [generated, setGen]  = useState(false);
+  var apiKey = localStorage.getItem('anthropic_api_key') || '';
 
-  const career = testRes.find(function(t){ return t.studentName===student.name && t.testType==='진로검사'; });
-  const person = testRes.find(function(t){ return t.studentName===student.name && t.testType==='성격검사'; });
-  const crisis = person && person.needsCounseling === 'Y';
-  const FIT_CLS = { '높음':'b-good', '보통':'b-warn', '낮음':'b-danger' };
-  const allRecs = records
+  // ── 데이터 지문: 기록수 + 마지막기록날짜 + 검사유무 ──────────────────────
+  function makeHash(name) {
+    var recs = records.filter(function(r){ return r.studentName === name; });
+    var last = recs.length > 0 ? recs.slice().sort(function(a,b){ return b.date.localeCompare(a.date); })[0].date : '';
+    var hasCareer = testRes.some(function(t){ return t.studentName===name && t.testType==='진로검사'; }) ? '1' : '0';
+    var hasPerson = testRes.some(function(t){ return t.studentName===name && t.testType==='성격검사'; }) ? '1' : '0';
+    return recs.length + '_' + last + '_' + hasCareer + '_' + hasPerson;
+  }
+
+  // ── 저장된 브리핑 파싱 ───────────────────────────────────────────────────
+  function parseSaved(raw) {
+    if (!raw) return { brief: '', hash: '' };
+    try {
+      var p = JSON.parse(raw);
+      if (p && p.__v >= 3) return { brief: p.brief || '', hash: p.hash || '' };
+    } catch(e) {}
+    return { brief: raw.startsWith('{') ? '' : raw, hash: '' };
+  }
+
+  var saved    = parseSaved(student.profile);
+  var curHash  = makeHash(student.name);
+  var isStale  = saved.brief && saved.hash !== curHash;  // 브리핑 있는데 데이터가 바뀐 경우
+  var hasFresh = saved.brief && saved.hash === curHash;  // 최신 브리핑 있음
+
+  var [brief,     setBrief]   = useState(saved.brief);
+  var [loading,   setLoading] = useState(false);
+  var [generated, setGen]     = useState(!!saved.brief);
+  var [stale,     setStale]   = useState(isStale);
+
+  var career = testRes.find(function(t){ return t.studentName===student.name && t.testType==='진로검사'; });
+  var person = testRes.find(function(t){ return t.studentName===student.name && t.testType==='성격검사'; });
+  var crisis = person && person.needsCounseling === 'Y';
+  var FIT_CLS = { '높음':'b-good', '보통':'b-warn', '낮음':'b-danger' };
+  var allRecs = records
     .filter(function(r){ return r.studentName===student.name; })
     .sort(function(a,b){ return b.date.localeCompare(a.date); });
 
-  useEffect(function() {
-    if (!student.profile) return;
-    try {
-      var p = JSON.parse(student.profile);
-      if (p && p.brief) { setBrief(p.brief); setGen(true); return; }
-    } catch(e) {}
-    if (!student.profile.startsWith('{')) { setBrief(student.profile); setGen(true); }
-  }, []);
-
   async function generate() {
     if (!apiKey) { showToast('API 키가 필요해요 — 입력 탭에서 설정', false); return; }
-    setLoading(true); setBrief('');
+    setLoading(true); setBrief(''); setGen(false); setStale(false);
     var NL = '\n';
     var recText = allRecs.slice(0,20).map(function(r){
       return '[' + r.date + '][' + r.type + '] ' + r.summary + ' / ' + r.content;
@@ -824,7 +841,6 @@ function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, 
       '📝 최근 주요 기록 요약',
       '💬 통화 시 꺼낼 화제 (2~3가지)'
     ];
-    var prompt = lines.join(NL);
     try {
       var resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -837,7 +853,7 @@ function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, 
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
           max_tokens: 1200,
-          messages: [{ role:'user', content: prompt }]
+          messages: [{ role:'user', content: lines.join(NL) }]
         })
       });
       var d = await resp.json();
@@ -845,26 +861,31 @@ function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, 
       var text = d.content && d.content[0] ? d.content[0].text : '';
       setBrief(text);
       setGen(true);
+      // 자동 저장 (지문 포함)
+      var newHash    = makeHash(student.name);
+      var profileStr = JSON.stringify({ __v:3, brief: text, hash: newHash });
+      await apiPost(cfg.scriptUrl, { action:'updateStudent', id:student.id, profile: profileStr });
+      setStudents(function(prev){
+        return prev.map(function(s){
+          return s.id===student.id ? Object.assign({},s,{profile:profileStr}) : s;
+        });
+      });
+      showToast('브리핑 저장됨 ✅');
     } catch(e) {
       showToast('브리핑 생성 실패: ' + e.message, false);
     }
     setLoading(false);
-  }
-  async function saveBrief() {
-    try {
-      var profile = JSON.stringify({ __v:3, brief: brief });
-      await apiPost(cfg.scriptUrl, { action:'updateStudent', id:student.id, profile });
-      setStudents(function(prev){ return prev.map(function(s){ return s.id===student.id ? Object.assign({},s,{profile:profile}) : s; }); });
-      showToast('저장됨 ✅');
-    } catch(e) { showToast('저장 실패', false); }
   }
 
   return (
     <div className="overlay" onClick={function(e){ if(e.target===e.currentTarget) onClose(); }}>
       <div className="modal" style={{paddingBottom:32}}>
         <div className="mhandle"/>
+
+        {/* 헤더 */}
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
-          <div style={{width:44,height:44,borderRadius:'50%',background:'linear-gradient(135deg,#667eea,#764ba2)',
+          <div style={{width:44,height:44,borderRadius:'50%',
+            background:'linear-gradient(135deg,#667eea,#764ba2)',
             display:'flex',alignItems:'center',justifyContent:'center',
             color:'#fff',fontWeight:800,fontSize:20,flexShrink:0}}>
             {student.name[0]}
@@ -880,6 +901,7 @@ function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, 
           <div style={{fontSize:11,color:'#a0aec0',textAlign:'right',lineHeight:1.4}}>📞 전화 상담<br/>브리핑</div>
         </div>
 
+        {/* 위기 경보 */}
         {crisis && person && person.riskFlags && (
           <div style={{background:'#fff5f5',border:'1.5px solid #fc8181',borderRadius:10,padding:10,marginBottom:12}}>
             <div style={{fontWeight:700,color:'#c53030',fontSize:12,marginBottom:5}}>🚨 위기영역 (T점수 60 미만)</div>
@@ -889,12 +911,35 @@ function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, 
           </div>
         )}
 
+        {/* 데이터 변경 알림 */}
+        {stale && !loading && (
+          <div style={{background:'#fffbeb',border:'1.5px solid #f6e05e',borderRadius:10,padding:10,marginBottom:12,display:'flex',alignItems:'center',gap:8}}>
+            <span style={{fontSize:16}}>🔄</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,fontWeight:700,color:'#744210'}}>새로운 기록이 추가됐어요</div>
+              <div style={{fontSize:11,color:'#975a16'}}>저장된 브리핑이 있지만 데이터가 바뀌었어요</div>
+            </div>
+            <button className="btn btn-sm" style={{background:'#ed8936',color:'#fff',border:'none',whiteSpace:'nowrap'}} onClick={generate}>
+              재생성
+            </button>
+          </div>
+        )}
+
+        {/* 로딩 */}
+        {loading && (
+          <div style={{textAlign:'center',padding:'40px 0',color:'#667eea'}}>
+            <span className="spin" style={{width:28,height:28,borderWidth:3,display:'inline-block'}}/>
+            <p style={{marginTop:16,fontSize:13,fontWeight:600}}>AI가 분석 중이에요…<br/><span style={{fontSize:11,color:'#a0aec0',fontWeight:400}}>10~20초 소요</span></p>
+          </div>
+        )}
+
+        {/* 브리핑 없음 */}
         {!generated && !loading && (
           <div style={{textAlign:'center',padding:'24px 0'}}>
             <div style={{fontSize:36,marginBottom:8}}>🤖</div>
             <p style={{fontSize:14,color:'#4a5568',marginBottom:4,fontWeight:600}}>AI 전화 상담 브리핑</p>
             <p style={{fontSize:12,color:'#a0aec0',marginBottom:20,lineHeight:1.6}}>
-              관찰·상담 기록과 진로·성격검사 결과를<br/>분석해서 핵심 내용을 정리해드려요
+              관찰·상담 기록과 진로·성격검사 결과를<br/>분석해서 핵심 내용을 정리해드려요.<br/>생성 후 자동 저장됩니다.
             </p>
             <button className="btn btn-p btn-fw" onClick={generate}>✨ AI 브리핑 생성</button>
             {allRecs.length===0 && !career && !person && (
@@ -903,26 +948,24 @@ function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, 
           </div>
         )}
 
-        {loading && (
-          <div style={{textAlign:'center',padding:'40px 0',color:'#667eea'}}>
-            <span className="spin" style={{width:32,height:32,borderWidth:3}}/>
-            <p style={{marginTop:16,fontSize:13,fontWeight:600}}>AI가 분석 중이에요…<br/><span style={{fontSize:11,color:'#a0aec0',fontWeight:400}}>10~20초 소요</span></p>
-          </div>
-        )}
-
+        {/* 브리핑 표시 */}
         {generated && !loading && (
           <div>
-            <div style={{background:'#f0f4ff',border:'1.5px solid #c3d2f7',borderRadius:12,padding:14,marginBottom:12}}>
+            {hasFresh && (
+              <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
+                <span style={{fontSize:11,color:'#68d391'}}>✅ 최신 브리핑</span>
+                <span style={{fontSize:11,color:'#a0aec0',marginLeft:'auto',cursor:'pointer'}} onClick={generate}>🔄 재생성</span>
+              </div>
+            )}
+            <div style={{background:'#f0f4ff',border:'1.5px solid #c3d2f7',borderRadius:12,padding:14}}>
               <div style={{fontSize:13,color:'#2d3748',whiteSpace:'pre-wrap',lineHeight:1.9}}>{brief}</div>
-            </div>
-            <div style={{display:'flex',gap:8,marginBottom:12}}>
-              <button className="btn btn-s btn-sm" style={{flex:1}} onClick={function(){ setGen(false); setBrief(''); setTimeout(generate,100); }}>🔄 재생성</button>
-              <button className="btn btn-p btn-sm" style={{flex:2}} onClick={saveBrief}>💾 저장</button>
             </div>
           </div>
         )}
 
-        <button className="btn btn-s btn-fw" onClick={onClose}>닫기</button>
+        <div style={{marginTop:14}}>
+          <button className="btn btn-s btn-fw" onClick={onClose}>닫기</button>
+        </div>
       </div>
     </div>
   );
