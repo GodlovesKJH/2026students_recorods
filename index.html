@@ -797,43 +797,34 @@ function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, 
   async function generate() {
     if (!apiKey) { showToast('API 키가 필요해요 — 입력 탭에서 설정', false); return; }
     setLoading(true); setBrief('');
+    var NL = '\n';
     var recText = allRecs.slice(0,20).map(function(r){
       return '[' + r.date + '][' + r.type + '] ' + r.summary + ' / ' + r.content;
-    }).join('
-');
+    }).join(NL);
     var careerText = career
-      ? '진로코드: ' + career.careerCode1 + '/' + career.careerCode2 + ', 추천직업: ' + career.topJob1 + '·' + career.topJob2 + ', 계열: ' + career.topField + ', 적합도: ' + career.fitLevel
+      ? ('진로코드: ' + career.careerCode1 + '/' + career.careerCode2 + ', 추천직업: ' + career.topJob1 + '/' + career.topJob2 + ', 계열: ' + career.topField + ', 적합도: ' + career.fitLevel)
       : '진로검사 없음';
     var personText = person
-      ? '성격특징: ' + (person.personalitySummary||'') + ', 위기영역: ' + (person.riskFlags||'없음') + ', 상담필요: ' + person.needsCounseling
+      ? ('성격특징: ' + (person.personalitySummary||'') + ', 위기영역: ' + (person.riskFlags||'없음') + ', 상담필요: ' + person.needsCounseling)
       : '성격검사 없음';
-    var prompt = '당신은 초등학교 5학년 담임교사입니다. 학부모와 전화 상담 전, 학생 데이터를 분석해 교사가 통화 중 바로 참고할 브리핑을 작성해주세요.
-
-학생: ' + student.name + ' (' + student.gender + ') ' + (student.number||'') + '번
-
-진로검사: ' + careerText + '
-
-성격검사: ' + personText + '
-
-기록:
-' + (recText||'없음') + '
-
-아래 형식으로 작성 (실제 데이터 기반만, 추측 금지):
-
-🎯 진로 성향
-(2~3줄)
-
-🧠 성격·행동 특징
-(2~3줄)
-
-⚠️ 주의사항
-(위기영역, 반복 패턴, 상담 주의점)
-
-📝 최근 주요 기록 요약
-(최근 1~2개월 핵심)
-
-💬 통화 시 꺼낼 화제
-(데이터 기반 대화 포인트 2~3가지)';
+    var lines = [
+      '당신은 초등학교 5학년 담임교사입니다. 학부모와 전화 상담 전 브리핑을 작성해주세요.',
+      '',
+      '학생: ' + student.name + ' (' + student.gender + ') ' + (student.number||'') + '번',
+      '진로검사: ' + careerText,
+      '성격검사: ' + personText,
+      '기록:',
+      (recText || '없음'),
+      '',
+      '아래 형식으로 작성 (실제 데이터 기반만, 추측 금지):',
+      '',
+      '🎯 진로 성향 (2~3줄)',
+      '🧠 성격·행동 특징 (2~3줄)',
+      '⚠️ 주의사항 (위기영역, 반복 패턴)',
+      '📝 최근 주요 기록 요약',
+      '💬 통화 시 꺼낼 화제 (2~3가지)'
+    ];
+    var prompt = lines.join(NL);
     try {
       var resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -859,7 +850,6 @@ function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, 
     }
     setLoading(false);
   }
-
   async function saveBrief() {
     try {
       var profile = JSON.stringify({ __v:3, brief: brief });
