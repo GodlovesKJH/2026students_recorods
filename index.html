@@ -224,7 +224,8 @@ function App() {
   const [records,  setRecords]      = useState([]);
   const [testRes,  setTestRes]      = useState([]);
   const [tab,      setTab]          = useState(0);
-  const [toast,    setToast]        = useState(null);
+  const [toast,     setToast]    = useState(null);
+  const [reloading, setReloading]= useState(false);
   const timerRef = useRef(null);
 
   const showToast = useCallback((msg, ok=true) => {
@@ -236,6 +237,8 @@ function App() {
   useEffect(() => { if (cfg?.scriptUrl) loadAll(); }, [cfg]);
 
   async function loadAll() {
+    setReloading(true);
+    showToast('🔄 데이터 불러오는 중…');
     try {
       const [sr, rr, tr] = await Promise.all([
         apiGet(cfg.scriptUrl, { action:'getStudents' }),
@@ -261,10 +264,14 @@ function App() {
           topField:r[8], fitLevel:r[9], personalitySummary:r[10],
           riskFlags:r[11], needsCounseling:r[12], createdAt:r[13]
         })));
+        showToast('✅ 완료 — 검사결과 포함 로드됨');
+      } else {
+        showToast('✅ 완료');
       }
     } catch(e) {
       showToast('데이터 로드 실패', false);
     }
+    setReloading(false);
   }
 
   function saveCfg(c) { localStorage.setItem('app_config', JSON.stringify(c)); setCfg(c); }
@@ -289,7 +296,7 @@ function App() {
         {tab===0 && <InputTab  cfg={cfg} apiKey={apiKey} students={students} records={records} setRecords={setRecords} showToast={showToast} saveKey={saveKey} />}
         {tab===1 && <RecsTab   cfg={cfg} records={records} setRecords={setRecords} showToast={showToast} />}
         {tab===2 && <StudTab   cfg={cfg} students={students} records={records} testRes={testRes} setStudents={setStudents} showToast={showToast} />}
-        {tab===3 && <ManageTab cfg={cfg} students={students} setStudents={setStudents} showToast={showToast} onReload={loadAll} onReset={() => { localStorage.clear(); setCfg(null); }} />}
+        {tab===3 && <ManageTab cfg={cfg} students={students} setStudents={setStudents} showToast={showToast} onReload={loadAll} reloading={reloading} onReset={() => { localStorage.clear(); setCfg(null); }} />}
       </div>
       {toast && <div className={'toast' + (toast.ok?'':' err')}>{toast.msg}</div>}
     </div>
@@ -793,7 +800,7 @@ function ProfileModal({ student, cfg, setStudents, showToast, onClose }) {
 }
 
 // ── 관리 탭 ──────────────────────────────────────────────────────────────────
-function ManageTab({ cfg, students, setStudents, showToast, onReload, onReset }) {
+function ManageTab({ cfg, students, setStudents, showToast, onReload, reloading, onReset }) {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name:'', gender:'여', number:'', memo:'' });
 
@@ -826,7 +833,9 @@ function ManageTab({ cfg, students, setStudents, showToast, onReload, onReset })
   return (
     <div>
       <div style={{display:'flex',gap:8,marginBottom:16}}>
-        <button className="btn btn-s btn-sm" onClick={onReload}>🔄 새로고침</button>
+        <button className="btn btn-s btn-sm" onClick={onReload} disabled={reloading}>
+          {reloading ? <><span className="spin"/>&nbsp;로딩 중…</> : '🔄 새로고침'}
+        </button>
         <button className="btn btn-p btn-sm" style={{flex:1}} onClick={() => setShowAdd(!showAdd)}>
           {showAdd ? '취소' : '+ 학생 추가'}
         </button>
