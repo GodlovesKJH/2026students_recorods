@@ -773,85 +773,69 @@ function StudTab({ cfg, students, records, testRes, setStudents, showToast }) {
 
 function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, onClose }) {
   const apiKey = localStorage.getItem('anthropic_api_key') || '';
-  const [brief,    setBrief]   = useState('');
-  const [loading,  setLoading] = useState(false);
-  const [generated,setGen]     = useState(false);
+  const [brief,   setBrief]  = useState('');
+  const [loading, setLoading]= useState(false);
+  const [generated, setGen]  = useState(false);
 
-  const career = testRes.find(t => t.studentName===student.name && t.testType==='진로검사');
-  const person = testRes.find(t => t.studentName===student.name && t.testType==='성격검사');
-  const crisis = person?.needsCounseling === 'Y';
+  const career = testRes.find(function(t){ return t.studentName===student.name && t.testType==='진로검사'; });
+  const person = testRes.find(function(t){ return t.studentName===student.name && t.testType==='성격검사'; });
+  const crisis = person && person.needsCounseling === 'Y';
   const FIT_CLS = { '높음':'b-good', '보통':'b-warn', '낮음':'b-danger' };
-
   const allRecs = records
-    .filter(r => r.studentName===student.name)
-    .sort((a,b) => b.date.localeCompare(a.date));
+    .filter(function(r){ return r.studentName===student.name; })
+    .sort(function(a,b){ return b.date.localeCompare(a.date); });
 
-  // 앱 열 때 저장된 브리핑이 있으면 표시
-  useEffect(() => {
-    if (student.profile && !student.profile.startsWith('{')) {
-      setBrief(student.profile);
-      setGen(true);
-    } else if (student.profile) {
-      try {
-        const p = JSON.parse(student.profile);
-        if (p.brief) { setBrief(p.brief); setGen(true); }
-      } catch {}
-    }
+  useEffect(function() {
+    if (!student.profile) return;
+    try {
+      var p = JSON.parse(student.profile);
+      if (p && p.brief) { setBrief(p.brief); setGen(true); return; }
+    } catch(e) {}
+    if (!student.profile.startsWith('{')) { setBrief(student.profile); setGen(true); }
   }, []);
 
   async function generate() {
-    if (!apiKey) { showToast('API 키가 필요해요 — ✏️ 입력 탭에서 설정', false); return; }
-    setLoading(true);
-    setBrief('');
-
-    const recText = allRecs.slice(0,20).map(r =>
-      `[${r.date}][${r.type}] ${r.summary} / ${r.content}`
-    ).join('
+    if (!apiKey) { showToast('API 키가 필요해요 — 입력 탭에서 설정', false); return; }
+    setLoading(true); setBrief('');
+    var recText = allRecs.slice(0,20).map(function(r){
+      return '[' + r.date + '][' + r.type + '] ' + r.summary + ' / ' + r.content;
+    }).join('
 ');
-
-    const careerText = career
-      ? `진로코드: ${career.careerCode1}/${career.careerCode2}, 추천직업: ${career.topJob1}·${career.topJob2}, 계열: ${career.topField}, 적합도: ${career.fitLevel}`
+    var careerText = career
+      ? '진로코드: ' + career.careerCode1 + '/' + career.careerCode2 + ', 추천직업: ' + career.topJob1 + '·' + career.topJob2 + ', 계열: ' + career.topField + ', 적합도: ' + career.fitLevel
       : '진로검사 없음';
-
-    const personText = person
-      ? `성격특징: ${person.personalitySummary || ''}, 위기영역: ${person.riskFlags || '없음'}, 상담필요: ${person.needsCounseling}`
+    var personText = person
+      ? '성격특징: ' + (person.personalitySummary||'') + ', 위기영역: ' + (person.riskFlags||'없음') + ', 상담필요: ' + person.needsCounseling
       : '성격검사 없음';
+    var prompt = '당신은 초등학교 5학년 담임교사입니다. 학부모와 전화 상담 전, 학생 데이터를 분석해 교사가 통화 중 바로 참고할 브리핑을 작성해주세요.
 
-    const prompt = `당신은 초등학교 5학년 담임교사입니다. 학부모와 전화 상담 전, 해당 학생의 데이터를 분석해서 교사가 전화 통화 중 바로 참고할 수 있는 간결한 브리핑을 작성해주세요.
+학생: ' + student.name + ' (' + student.gender + ') ' + (student.number||'') + '번
 
-학생 정보:
-- 이름: ${student.name} (${student.gender})
-- 번호: ${student.number || '미지정'}번
+진로검사: ' + careerText + '
 
-진로검사 결과:
-${careerText}
+성격검사: ' + personText + '
 
-성격검사 결과:
-${personText}
+기록:
+' + (recText||'없음') + '
 
-지금까지의 관찰·상담 기록 (최근순):
-${recText || '기록 없음'}
-
----
-아래 형식으로 작성해주세요. 각 항목은 실제 데이터 기반으로만 작성하고, 데이터가 없는 항목은 "해당 없음"으로 표시하세요. 추측이나 과잉 해석 금지.
+아래 형식으로 작성 (실제 데이터 기반만, 추측 금지):
 
 🎯 진로 성향
-(진로코드 의미, 추천직업, 적합도 해석 — 2~3줄)
+(2~3줄)
 
 🧠 성격·행동 특징
-(성격검사 기반 주요 특징 — 2~3줄)
+(2~3줄)
 
 ⚠️ 주의사항
-(위기영역 있을 경우 구체적 항목, 관찰 기록에서 반복 패턴, 상담 시 주의점 — 2~3줄)
+(위기영역, 반복 패턴, 상담 주의점)
 
-📝 최근 주요 기록
-(최근 1~2개월 내 중요 관찰·상담 내용 요약 — 3~5줄)
+📝 최근 주요 기록 요약
+(최근 1~2개월 핵심)
 
-💬 통화 시 꺼낼 수 있는 화제
-(위 데이터 기반으로 학부모와 자연스럽게 나눌 수 있는 대화 포인트 2~3가지)`;
-
+💬 통화 시 꺼낼 화제
+(데이터 기반 대화 포인트 2~3가지)';
     try {
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
+      var resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -862,58 +846,35 @@ ${recText || '기록 없음'}
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
           max_tokens: 1200,
-          stream: true,
           messages: [{ role:'user', content: prompt }]
         })
       });
-      if (!r.ok) throw new Error('API 오류');
-      const reader = r.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('
-');
-        buf = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') continue;
-          try {
-            const evt = JSON.parse(data);
-            if (evt.type === 'content_block_delta' && evt.delta?.text) {
-              setBrief(prev => prev + evt.delta.text);
-            }
-          } catch {}
-        }
-      }
+      var d = await resp.json();
+      if (!resp.ok) throw new Error(d.error ? d.error.message : 'API 오류');
+      var text = d.content && d.content[0] ? d.content[0].text : '';
+      setBrief(text);
       setGen(true);
     } catch(e) {
-      showToast('AI 브리핑 생성 실패: ' + e.message, false);
+      showToast('브리핑 생성 실패: ' + e.message, false);
     }
     setLoading(false);
   }
 
   async function saveBrief() {
     try {
-      const profile = JSON.stringify({ __v:3, brief });
+      var profile = JSON.stringify({ __v:3, brief: brief });
       await apiPost(cfg.scriptUrl, { action:'updateStudent', id:student.id, profile });
-      setStudents(prev => prev.map(s => s.id===student.id ? {...s, profile} : s));
+      setStudents(function(prev){ return prev.map(function(s){ return s.id===student.id ? Object.assign({},s,{profile:profile}) : s; }); });
       showToast('저장됨 ✅');
-    } catch { showToast('저장 실패', false); }
+    } catch(e) { showToast('저장 실패', false); }
   }
 
   return (
-    <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+    <div className="overlay" onClick={function(e){ if(e.target===e.currentTarget) onClose(); }}>
       <div className="modal" style={{paddingBottom:32}}>
         <div className="mhandle"/>
-
-        {/* 헤더 */}
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
-          <div style={{width:44,height:44,borderRadius:'50%',
-            background:'linear-gradient(135deg,#667eea,#764ba2)',
+          <div style={{width:44,height:44,borderRadius:'50%',background:'linear-gradient(135deg,#667eea,#764ba2)',
             display:'flex',alignItems:'center',justifyContent:'center',
             color:'#fff',fontWeight:800,fontSize:20,flexShrink:0}}>
             {student.name[0]}
@@ -929,40 +890,33 @@ ${recText || '기록 없음'}
           <div style={{fontSize:11,color:'#a0aec0',textAlign:'right',lineHeight:1.4}}>📞 전화 상담<br/>브리핑</div>
         </div>
 
-        {/* 위기 경보 */}
-        {crisis && person?.riskFlags && (
+        {crisis && person && person.riskFlags && (
           <div style={{background:'#fff5f5',border:'1.5px solid #fc8181',borderRadius:10,padding:10,marginBottom:12}}>
             <div style={{fontWeight:700,color:'#c53030',fontSize:12,marginBottom:5}}>🚨 위기영역 (T점수 60 미만)</div>
-            <div>{person.riskFlags.split(',').filter(Boolean).map((f,i)=>(
-              <span key={i} className="risk-tag">{f.trim()}</span>
-            ))}</div>
+            <div>{person.riskFlags.split(',').filter(Boolean).map(function(f,i){
+              return <span key={i} className="risk-tag">{f.trim()}</span>;
+            })}</div>
           </div>
         )}
 
-        {/* AI 브리핑 영역 */}
         {!generated && !loading && (
           <div style={{textAlign:'center',padding:'24px 0'}}>
             <div style={{fontSize:36,marginBottom:8}}>🤖</div>
             <p style={{fontSize:14,color:'#4a5568',marginBottom:4,fontWeight:600}}>AI 전화 상담 브리핑</p>
             <p style={{fontSize:12,color:'#a0aec0',marginBottom:20,lineHeight:1.6}}>
-              지금까지의 관찰·상담 기록과<br/>진로·성격검사 결과를 분석해서<br/>전화 통화 전 핵심 내용을 정리해드려요
+              관찰·상담 기록과 진로·성격검사 결과를<br/>분석해서 핵심 내용을 정리해드려요
             </p>
-            <button className="btn btn-p btn-fw" onClick={generate}>
-              ✨ AI 브리핑 생성
-            </button>
-            {allRecs.length === 0 && !career && !person && (
-              <p style={{fontSize:11,color:'#fc8181',marginTop:10}}>⚠️ 아직 기록이나 검사결과가 없어요</p>
+            <button className="btn btn-p btn-fw" onClick={generate}>✨ AI 브리핑 생성</button>
+            {allRecs.length===0 && !career && !person && (
+              <p style={{fontSize:11,color:'#fc8181',marginTop:10}}>⚠️ 기록이나 검사결과가 아직 없어요</p>
             )}
           </div>
         )}
 
         {loading && (
-          <div style={{background:'#f7fafc',borderRadius:12,padding:16,minHeight:120,marginBottom:12}}>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,color:'#667eea'}}>
-              <span className="spin" style={{borderColor:'rgba(102,126,234,.3)',borderTopColor:'#667eea'}}/>
-              <span style={{fontSize:13,fontWeight:600}}>AI가 분석 중…</span>
-            </div>
-            <div style={{fontSize:13,color:'#4a5568',whiteSpace:'pre-wrap',lineHeight:1.8}}>{brief}</div>
+          <div style={{textAlign:'center',padding:'40px 0',color:'#667eea'}}>
+            <span className="spin" style={{width:32,height:32,borderWidth:3}}/>
+            <p style={{marginTop:16,fontSize:13,fontWeight:600}}>AI가 분석 중이에요…<br/><span style={{fontSize:11,color:'#a0aec0',fontWeight:400}}>10~20초 소요</span></p>
           </div>
         )}
 
@@ -972,12 +926,8 @@ ${recText || '기록 없음'}
               <div style={{fontSize:13,color:'#2d3748',whiteSpace:'pre-wrap',lineHeight:1.9}}>{brief}</div>
             </div>
             <div style={{display:'flex',gap:8,marginBottom:12}}>
-              <button className="btn btn-s btn-sm" style={{flex:1}} onClick={() => { setGen(false); setBrief(''); generate(); }}>
-                🔄 재생성
-              </button>
-              <button className="btn btn-p btn-sm" style={{flex:2}} onClick={saveBrief}>
-                💾 저장 (다음에도 보기)
-              </button>
+              <button className="btn btn-s btn-sm" style={{flex:1}} onClick={function(){ setGen(false); setBrief(''); setTimeout(generate,100); }}>🔄 재생성</button>
+              <button className="btn btn-p btn-sm" style={{flex:2}} onClick={saveBrief}>💾 저장</button>
             </div>
           </div>
         )}
