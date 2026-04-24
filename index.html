@@ -762,37 +762,188 @@ function StudTab({ cfg, students, records, testRes, setStudents, showToast }) {
       })}
 
       {profModal && (
-        <ProfileModal student={profModal} cfg={cfg} setStudents={setStudents} showToast={showToast} onClose={() => setProfModal(null)} />
+        <ProfileModal
+          student={profModal} cfg={cfg} records={records} testRes={testRes}
+          setStudents={setStudents} showToast={showToast} onClose={() => setProfModal(null)}
+        />
       )}
     </div>
   );
 }
 
-function ProfileModal({ student, cfg, setStudents, showToast, onClose }) {
-  const [profile, setProfile] = useState(student.profile || '');
-  async function save() {
+function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, onClose }) {
+  // 구조화된 메모 파싱 (저장 형식: JSON 또는 기존 텍스트)
+  function parseMemo(raw) {
     try {
+      const p = JSON.parse(raw || '{}');
+      if (p.__v === 2) return p;
+    } catch {}
+    // 기존 텍스트 메모 → 자유메모로 이전
+    return { __v:2, contact:'', family:'', caution:'', support:'', free: raw||'' };
+  }
+  const [memo, setMemo] = useState(() => parseMemo(student.profile));
+  const [saving, setSaving] = useState(false);
+
+  const career = testRes.find(t => t.studentName===student.name && t.testType==='진로검사');
+  const person = testRes.find(t => t.studentName===student.name && t.testType==='성격검사');
+  const recentRecs = records
+    .filter(r => r.studentName===student.name)
+    .sort((a,b) => b.date.localeCompare(a.date))
+    .slice(0,5);
+  const counselRecs = records
+    .filter(r => r.studentName===student.name && (r.type==='상담'||r.type==='학부모상담'))
+    .sort((a,b) => b.date.localeCompare(a.date))
+    .slice(0,3);
+  const crisis = person?.needsCounseling === 'Y';
+
+  const FIT_CLS = { '높음':'b-good', '보통':'b-warn', '낮음':'b-danger' };
+
+  async function save() {
+    setSaving(true);
+    try {
+      const profile = JSON.stringify({...memo, __v:2});
       await apiPost(cfg.scriptUrl, { action:'updateStudent', id:student.id, profile });
       setStudents(prev => prev.map(s => s.id===student.id ? {...s, profile} : s));
-      showToast('프로필 저장됨 ✅');
+      showToast('저장됨 ✅');
       onClose();
     } catch { showToast('저장 실패', false); }
+    setSaving(false);
   }
+
+  const fieldStyle = { marginBottom:10 };
+  const infoRow = (label, val) => val ? (
+    <div style={{display:'flex',gap:6,marginBottom:5,fontSize:13}}>
+      <span style={{color:'#a0aec0',minWidth:60,flexShrink:0}}>{label}</span>
+      <span style={{color:'#2d3748',fontWeight:500}}>{val}</span>
+    </div>
+  ) : null;
+
   return (
     <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className="modal" style={{paddingBottom:32}}>
         <div className="mhandle"/>
-        <h3 style={{fontWeight:700,marginBottom:4}}>📋 {student.name} 프로필</h3>
-        <p style={{fontSize:12,color:'#718096',marginBottom:12}}>전화 상담 전 참고 메모</p>
-        <textarea
-          value={profile}
-          onChange={e => setProfile(e.target.value)}
-          placeholder={'예시:\n가족: 부모님 + 여동생(3학년)\n특이사항: 발달지원 주 2회\n성격: 조용하지만 수업 열심히\n연락: 엄마 주로 받음\n주의: 부모 갈등 관련 언급 시 주의'}
-          style={{minHeight:200,marginBottom:12}}
-        />
+
+        {/* 헤더 */}
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+          <div style={{width:44,height:44,borderRadius:'50%',background:'linear-gradient(135deg,#667eea,#764ba2)',
+            display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:800,fontSize:18,flexShrink:0}}>
+            {student.name[0]}
+          </div>
+          <div>
+            <div style={{display:'flex',alignItems:'center',gap:6}}>
+              <span style={{fontWeight:800,fontSize:18}}>{student.name}</span>
+              {crisis && <span style={{fontSize:16}}>🚨</span>}
+            </div>
+            <div style={{fontSize:12,color:'#718096'}}>{student.gender} · {student.number ? student.number+'번' : ''}</div>
+          </div>
+          <div style={{marginLeft:'auto',fontSize:11,color:'#a0aec0',textAlign:'right'}}>
+            📞 전화 상담<br/>준비 카드
+          </div>
+        </div>
+
+        {/* ① 위기 경보 */}
+        {crisis && person?.riskFlags && (
+          <div style={{background:'#fff5f5',border:'1.5px solid #fc8181',borderRadius:10,padding:12,marginBottom:14}}>
+            <div style={{fontWeight:700,color:'#c53030',marginBottom:6,fontSize:13}}>🚨 위기영역 주의 (T점수 60 미만)</div>
+            <div>{person.riskFlags.split(',').filter(Boolean).map((f,i)=>(
+              <span key={i} className="risk-tag">{f.trim()}</span>
+            ))}</div>
+          </div>
+        )}
+
+        {/* ② 진로검사 요약 */}
+        {career && (
+          <div className="tc tc-career" style={{marginBottom:10}}>
+            <div style={{fontWeight:700,fontSize:12,color:'#2b6cb0',marginBottom:6}}>🎯 진로검사 ({career.testDate})</div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:8,fontSize:13}}>
+              <span>코드 <b>{career.careerCode1}</b> / {career.careerCode2}</span>
+              <span className={'badge ' + (FIT_CLS[career.fitLevel]||'b-danger')}>적합도 {career.fitLevel}</span>
+            </div>
+            <div style={{fontSize:12,color:'#2b6cb0',marginTop:6}}>
+              📌 추천직업: {career.topJob1}{career.topJob2 ? ' · '+career.topJob2 : ''}
+            </div>
+            {career.topField && <div style={{fontSize:11,color:'#718096',marginTop:2}}>계열: {career.topField}</div>}
+          </div>
+        )}
+
+        {/* ③ 성격 요약 */}
+        {person?.personalitySummary && (
+          <div className="tc tc-person" style={{marginBottom:10}}>
+            <div style={{fontWeight:700,fontSize:12,color:'#276749',marginBottom:4}}>🧠 성격 특징</div>
+            <div style={{fontSize:12,color:'#2d3748'}}>{person.personalitySummary}</div>
+          </div>
+        )}
+
+        {/* ④ 최근 상담 기록 */}
+        {counselRecs.length > 0 && (
+          <div style={{marginBottom:14}}>
+            <div className="sec" style={{marginTop:0}}>📝 최근 상담 기록</div>
+            {counselRecs.map(r => (
+              <div key={r.id} style={{background:'#f7fafc',borderRadius:8,padding:10,marginBottom:6}}>
+                <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:4}}>
+                  <span className={'badge '+(TYPE_CLS[r.type]||'b-관찰')} style={{fontSize:10}}>{r.type}</span>
+                  <span style={{fontSize:11,color:'#a0aec0'}}>{r.date}</span>
+                </div>
+                <div style={{fontSize:12,fontWeight:600,marginBottom:2}}>{r.summary}</div>
+                <div style={{fontSize:11,color:'#718096',lineHeight:1.5}}>{r.content}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ⑤ 최근 전체 기록 (간략) */}
+        {recentRecs.length > 0 && counselRecs.length === 0 && (
+          <div style={{marginBottom:14}}>
+            <div className="sec" style={{marginTop:0}}>📝 최근 관찰 기록</div>
+            {recentRecs.map(r => (
+              <div key={r.id} style={{background:'#f7fafc',borderRadius:8,padding:10,marginBottom:6}}>
+                <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:3}}>
+                  <span className={'badge '+(TYPE_CLS[r.type]||'b-관찰')} style={{fontSize:10}}>{r.type}</span>
+                  <span style={{fontSize:11,color:'#a0aec0'}}>{r.date}</span>
+                </div>
+                <div style={{fontSize:12,color:'#2d3748'}}>{r.summary}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="divider"/>
+
+        {/* ⑥ 구조화 메모 */}
+        <div style={{marginBottom:4}}>
+          <div className="sec" style={{marginTop:8}}>✍️ 상담 전 메모</div>
+
+          <label>📱 연락처 / 주 연락자</label>
+          <input type="text" value={memo.contact||''} style={fieldStyle}
+            placeholder="예: 엄마 010-0000-0000 (주로 받음)"
+            onChange={e => setMemo({...memo, contact:e.target.value})} />
+
+          <label>👨‍👩‍👧 가족 구성</label>
+          <input type="text" value={memo.family||''} style={fieldStyle}
+            placeholder="예: 부모님 + 남동생(2학년)"
+            onChange={e => setMemo({...memo, family:e.target.value})} />
+
+          <label>⚠️ 통화 시 주의사항</label>
+          <input type="text" value={memo.caution||''} style={fieldStyle}
+            placeholder="예: 부모 갈등 언급 자제, 아빠와 통화 시 조심"
+            onChange={e => setMemo({...memo, caution:e.target.value})} />
+
+          <label>🤝 지원 사항</label>
+          <input type="text" value={memo.support||''} style={fieldStyle}
+            placeholder="예: 발달지원 주 2회, 특수교육대상자"
+            onChange={e => setMemo({...memo, support:e.target.value})} />
+
+          <label>📌 기타 자유 메모</label>
+          <textarea value={memo.free||''} style={{minHeight:80,marginBottom:12}}
+            placeholder="그 외 알아두면 좋은 내용"
+            onChange={e => setMemo({...memo, free:e.target.value})} />
+        </div>
+
         <div style={{display:'flex',gap:8}}>
-          <button className="btn btn-s" style={{flex:1}} onClick={onClose}>취소</button>
-          <button className="btn btn-p" style={{flex:2}} onClick={save}>저장</button>
+          <button className="btn btn-s" style={{flex:1}} onClick={onClose}>닫기</button>
+          <button className="btn btn-p" style={{flex:2}} onClick={save} disabled={saving}>
+            {saving ? <><span className="spin"/>&nbsp;저장 중…</> : '💾 저장'}
+          </button>
         </div>
       </div>
     </div>
