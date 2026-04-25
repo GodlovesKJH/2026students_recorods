@@ -193,6 +193,21 @@ const { useState, useEffect, useRef, useCallback } = React;
 
 // ── 유틸 ──────────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function hollandName(code) {
+  var names = { R:'현실형', I:'탐구형', A:'예술형', S:'사회형', E:'진취형', C:'관습형' };
+  var traits = {
+    R:'손재주·기술', I:'분석·탐구', A:'창의·예술',
+    S:'돌봄·사교', E:'리더십·설득', C:'꼼꼼·체계'
+  };
+  if (!code) return '';
+  var c1 = names[code[0]] || code[0];
+  var c2 = code[1] ? (names[code[1]] || code[1]) : '';
+  var t1 = traits[code[0]] || '';
+  var t2 = code[1] ? (traits[code[1]] || '') : '';
+  var label = c2 ? c1 + '·' + c2 : c1;
+  var trait = t2 ? t1.split('·')[0] + '·' + t2.split('·')[0] : t1;
+  return label + ' (' + trait + ')';
+}
 function todayStr() {
   const d = new Date();
   return d.getFullYear() + '-' +
@@ -688,7 +703,7 @@ function StudTab({ cfg, students, records, testRes, setStudents, showToast }) {
                 <div style={{display:'flex',alignItems:'center',gap:6}}>
                   <span style={{fontWeight:700,fontSize:16}}>{s.name}</span>
                   {crisis && <span title="위기 영역 상담 필요">🚨</span>}
-                  {c && <span className={'badge ' + (FIT_CLS[c.fitLevel]||'b-danger')} style={{fontSize:10}}>{c.careerCode1}</span>}
+                  {c && <span className={'badge ' + (FIT_CLS[c.fitLevel]||'b-danger')} style={{fontSize:10}}>{hollandName(c.careerCode1)}</span>}
                 </div>
                 <div style={{fontSize:11,color:'#718096'}}>{s.gender} · {allRecs.length}건</div>
               </div>
@@ -898,7 +913,7 @@ function ProfileModal({ student, cfg, records, testRes, setStudents, showToast, 
             <div style={{display:'flex',alignItems:'center',gap:6}}>
               <span style={{fontWeight:800,fontSize:18}}>{student.name}</span>
               {crisis && <span>🚨</span>}
-              {career && <span className={'badge '+(FIT_CLS[career.fitLevel]||'b-danger')} style={{fontSize:10}}>{career.careerCode1}</span>}
+              {career && <span className={'badge '+(FIT_CLS[career.fitLevel]||'b-danger')} style={{fontSize:10}}>{hollandName(career.careerCode1)}</span>}
             </div>
             <div style={{fontSize:11,color:'#718096'}}>{student.gender} · {student.number||''}번 · 기록 {allRecs.length}건</div>
           </div>
