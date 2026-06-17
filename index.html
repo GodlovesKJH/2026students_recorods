@@ -420,8 +420,89 @@ function InputTab({ cfg, apiKey, students, records, setRecords, showToast, saveK
   const [preview,  setPreview] = useState(null);
   const [showKey,  setShowKey] = useState(false);
   const [draftKey, setDraftKey]= useState('');
+  const [image,    setImage]   = useState(null);
   const recogRef  = useRef(null);
   const finalRef  = useRef('');
+  const fileRef   = useRef(null);
+
+  function onPickImage(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function() {
+      const result = reader.result;
+      const base64 = result.split(',')[1];
+      let mt = 'image/jpeg';
+      if (file.type === 'image/png') mt = 'image/png';
+      else if (file.type === 'image/webp') mt = 'image/webp';
+      else if (file.type === 'image/gif') mt = 'image/gif';
+      setImage({ data: base64, mediaType: mt, preview: result, name: file.name });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function parseImage() {
+    if (!image) { showToast('사진을 먼저 선택해주세요', false); return; }
+    if (!apiKey) { setShowKey(true); return; }
+    setParsing(true);
+    try {
+      const names = students.map(function(s){ return s.name; }).join(', ');
+      var NL = '\n';
+      var lines = [
+        '당신은 초등학교 담임교사를 돕는 기록 전문가입니다.',
+        '첨부된 사진은 학생이 손으로 쓴 반성문(또는 글)입니다.',
+        '',
+        '학급 학생 명단: ' + names,
+        '',
+        '다음 작업을 수행하세요:',
+        '1. 사진 속 손글씨를 최대한 정확히 읽어 그대로 전사(transcribe)',
+        '2. 글에서 학생 이름이 보이면 명단과 매칭, 없으면 "미확인"',
+        '3. 핵심 내용을 2~3문장으로 요약',
+        '4. 글씨가 불분명한 부분은 [?]로 표시',
+        '',
+        'JSON으로만 반환 (다른 텍스트, 마크다운 없음):',
+        '{"studentName":"이름","type":"특이사항","transcript":"전사한 원문 전체","summary":"핵심 요약 2~3문장","tags":"태그1,태그2,태그3"}'
+      ];
+      var prompt = lines.join(NL);
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 2000,
+          messages: [{
+            role: 'user',
+            content: [
+              { type:'image', source:{ type:'base64', media_type:image.mediaType, data:image.data } },
+              { type:'text', text: prompt }
+            ]
+          }]
+        })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ? d.error.message : 'API 오류');
+      const text = d.content[0].text.replace(/```json|```/g,'').trim();
+      const obj = JSON.parse(text);
+      const combined = '[전사]' + NL + (obj.transcript||'') + NL + NL + '[요약]' + NL + (obj.summary||'');
+      setPreview([{
+        studentName: obj.studentName || '미확인',
+        type: obj.type || '특이사항',
+        summary: obj.summary || '반성문',
+        content: combined,
+        tags: obj.tags || '반성문',
+        id: uid(), date: date, semester: getSem(),
+        raw: '[반성문 사진] ' + (image.name||''), createdAt: new Date().toISOString()
+      }]);
+    } catch(e) {
+      showToast('사진 분석 실패: ' + e.message, false);
+    }
+    setParsing(false);
+  }
 
   const toggleVoice = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -554,8 +635,9 @@ function InputTab({ cfg, apiKey, students, records, setRecords, showToast, saveK
       )}
 
       <div className="chips" style={{marginBottom:10}}>
-        <div className={'chip' + (mode==='memo'?' on':'')} onClick={() => setMode('memo')}>✏️ 메모·관찰</div>
-        <div className={'chip' + (mode==='call'?' on':'')} onClick={() => setMode('call')}>📞 전화상담 녹취</div>
+        <div className={'chip' + (mode==='memo'?' on':'')} onClick={() => { setMode('memo'); setImage(null); }}>✏️ 메모·관찰</div>
+        <div className={'chip' + (mode==='call'?' on':'')} onClick={() => { setMode('call'); setImage(null); }}>📞 전화상담 녹취</div>
+        <div className={'chip' + (mode==='photo'?' on':'')} onClick={() => setMode('photo')}>📷 반성문 사진</div>
       </div>
 
       {mode==='call' && (
@@ -565,34 +647,78 @@ function InputTab({ cfg, apiKey, students, records, setRecords, showToast, saveK
         </div>
       )}
 
+      {mode==='photo' && (
+        <div style={{background:'#f0f4ff',border:'1.5px solid #c3d2f7',borderRadius:10,padding:10,marginBottom:10,fontSize:12,color:'#2d3748'}}>
+          📷 반성문 사진 모드 — 학생이 쓴 반성문을 촬영해서 올리면<br/>
+          AI가 손글씨를 전사하고 핵심을 요약해 기록합니다.
+        </div>
+      )}
+
       <div style={{marginBottom:12}}>
         <label>날짜</label>
         <input type="date" value={date} onChange={e => setDate(e.target.value)} />
       </div>
 
-      <div style={{position:'relative'}}>
-        <textarea
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          placeholder={mode==='call' ? '전화상담 녹취 텍스트를 여기에 붙여넣으세요\n(STT 변환본, 클로바노트, 네이버 클로바 등)' : '음성 또는 직접 입력\n예: 오늘 경환이가 수업 중 딴짓이 심했어. 현아는 점심에 혼자 있었고...'}
-          style={{minHeight:140, paddingRight:72}}
-        />
-        <button
-          className={'vbtn' + (listen?' on':'')}
-          onClick={toggleVoice}
-          style={{position:'absolute',right:10,bottom:10}}
-        >
-          {listen ? '⏹' : '🎙'}
-        </button>
-      </div>
+      {mode !== 'photo' && (
+        <div style={{position:'relative'}}>
+          <textarea
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder={mode==='call' ? '전화상담 녹취 텍스트를 여기에 붙여넣으세요\n(STT 변환본, 클로바노트, 네이버 클로바 등)' : '음성 또는 직접 입력\n예: 오늘 경환이가 수업 중 딴짓이 심했어. 현아는 점심에 혼자 있었고...'}
+            style={{minHeight:140, paddingRight:72}}
+          />
+          <button
+            className={'vbtn' + (listen?' on':'')}
+            onClick={toggleVoice}
+            style={{position:'absolute',right:10,bottom:10}}
+          >
+            {listen ? '⏹' : '🎙'}
+          </button>
+        </div>
+      )}
+
+      {mode==='photo' && (
+        <div>
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPickImage} style={{display:'none'}} />
+          {!image ? (
+            <div
+              onClick={() => fileRef.current && fileRef.current.click()}
+              style={{border:'2px dashed #c3d2f7',borderRadius:12,padding:'36px 16px',textAlign:'center',cursor:'pointer',background:'#fafbff'}}
+            >
+              <div style={{fontSize:40,marginBottom:8}}>📷</div>
+              <div style={{fontSize:14,fontWeight:600,color:'#4a5568'}}>탭해서 반성문 촬영 / 사진 선택</div>
+              <div style={{fontSize:11,color:'#a0aec0',marginTop:4}}>또박또박 쓴 글씨, 밝은 조명에서 정면 촬영하면 정확도가 높아요</div>
+            </div>
+          ) : (
+            <div style={{position:'relative'}}>
+              <img src={image.preview} alt="반성문" style={{width:'100%',borderRadius:12,border:'1.5px solid #e2e8f0'}} />
+              <button
+                onClick={() => { setImage(null); if(fileRef.current) fileRef.current.value=''; }}
+                style={{position:'absolute',top:8,right:8,background:'rgba(0,0,0,.6)',color:'#fff',border:'none',borderRadius:'50%',width:30,height:30,cursor:'pointer',fontSize:16}}
+              >✕</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {listen && <p style={{fontSize:12,color:'#e53e3e',textAlign:'center',margin:'4px 0'}}>🔴 음성 인식 중… 탭하면 중지</p>}
 
       <div style={{display:'flex',gap:8,marginTop:10}}>
-        <button className="btn btn-s btn-sm" onClick={() => { setInput(''); setPreview(null); }}>지우기</button>
-        <button className="btn btn-p" style={{flex:1}} onClick={parse} disabled={parsing}>
-          {parsing ? <><span className="spin"/>&nbsp;분류 중…</> : '🤖 AI 분류'}
-        </button>
+        {mode==='photo' ? (
+          <>
+            <button className="btn btn-s btn-sm" onClick={() => { setImage(null); setPreview(null); if(fileRef.current) fileRef.current.value=''; }}>지우기</button>
+            <button className="btn btn-p" style={{flex:1}} onClick={parseImage} disabled={parsing || !image}>
+              {parsing ? <><span className="spin"/>&nbsp;사진 분석 중…</> : '📷 전사 + 요약'}
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="btn btn-s btn-sm" onClick={() => { setInput(''); setPreview(null); }}>지우기</button>
+            <button className="btn btn-p" style={{flex:1}} onClick={parse} disabled={parsing}>
+              {parsing ? <><span className="spin"/>&nbsp;분류 중…</> : '🤖 AI 분류'}
+            </button>
+          </>
+        )}
       </div>
 
       {preview && (
