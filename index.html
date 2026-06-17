@@ -194,6 +194,32 @@ const { useState, useEffect, useRef, useCallback } = React;
 
 // ── 유틸 ──────────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function safeParseArray(text) {
+  // 정상 파싱 시도
+  try { var a = JSON.parse(text); return Array.isArray(a) ? a : [a]; } catch(e) {}
+  // 잘린 JSON 복구: 완성된 객체 {...}만 골라내기
+  var items = [];
+  var depth = 0, start = -1, inStr = false, prev = '';
+  for (var i = 0; i < text.length; i++) {
+    var ch = text[i];
+    if (inStr) {
+      if (ch === '"' && prev !== '\\') inStr = false;
+    } else if (ch === '"') {
+      inStr = true;
+    } else if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        try { items.push(JSON.parse(text.slice(start, i+1))); } catch(e) {}
+        start = -1;
+      }
+    }
+    prev = ch;
+  }
+  return items;
+}
 function extractBrief(raw) {
   if (!raw) return '';
   try {
@@ -590,19 +616,28 @@ function InputTab({ cfg, apiKey, students, records, setRecords, showToast, saveK
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
-          max_tokens: isMemo ? 1000 : 2000,
+          max_tokens: isMemo ? 1500 : 4000,
           messages: [{ role:'user', content: prompt }]
         })
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error?.message || 'API 오류');
-      const text = d.content[0].text.replace(/```json|```/g,'').trim();
-      const parsed = JSON.parse(text);
+      var stopReason = d.stop_reason;
+      var text = d.content[0].text.replace(/```json|```/g,'').trim();
+      var parsed = safeParseArray(text);
+      if (!parsed || parsed.length === 0) throw new Error('결과를 읽지 못했어요. 녹취가 너무 길면 절반씩 나눠서 시도해보세요.');
       setPreview(parsed.map(item => ({
-        ...item,
+        studentName: item.studentName || '미확인',
+        type: item.type || (isMemo ? '관찰' : '학부모상담'),
+        summary: item.summary || '',
+        content: item.content || '',
+        tags: item.tags || '',
         id: uid(), date, semester: getSem(),
         raw: input, createdAt: new Date().toISOString()
       })));
+      if (stopReason === 'max_tokens') {
+        showToast('일부만 추출됐어요. 녹취가 길면 나눠서 시도하세요', false);
+      }
     } catch(e) {
       showToast('AI 분류 실패: ' + e.message, false);
     }
