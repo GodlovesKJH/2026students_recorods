@@ -194,6 +194,15 @@ const { useState, useEffect, useRef, useCallback } = React;
 
 // ── 유틸 ──────────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function extractBrief(raw) {
+  if (!raw) return '';
+  try {
+    var p = JSON.parse(raw);
+    if (p && p.brief) return p.brief;
+  } catch(e) {}
+  if (raw.charAt(0) === '{') return '';
+  return raw;
+}
 function hollandName(code) {
   var names = { R:'현실형', I:'탐구형', A:'예술형', S:'사회형', E:'진취형', C:'관습형' };
   var traits = {
@@ -884,8 +893,8 @@ function StudTab({ cfg, students, records, testRes, setStudents, showToast }) {
 
             {isOpen && (
               <div style={{paddingBottom:16}}>
-                {/* 프로필 */}
-                {s.profile && <div className="profile-box">{s.profile}</div>}
+                {/* 프로필 (AI 브리핑) */}
+                {extractBrief(s.profile) && <div className="profile-box">{extractBrief(s.profile)}</div>}
 
                 {/* 검사 결과 */}
                 {(c || p) && (
